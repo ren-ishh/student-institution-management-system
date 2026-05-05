@@ -5,101 +5,126 @@
 // ============================================
 
 import INSTITUTION from '../../config/institution.js';
+import { auth, leaves, hostelLeaves, attendance, marks, notices, getUser, isLoggedIn, clearSession } from '../api.js';
 
-// ── Mock student data (replace with API later) ──
-const STUDENT = {
-  name: 'Arjun Singh',
-  initials: 'AS',
-  rollNumber: 'CS2023001',
-  department: 'Computer Science',
-  semester: '5th Semester',
-  batch: '2023–27',
-  cgpa: 8.6,
-  email: 'arjun.singh@greenfield.edu.in',
-  phone: '+91 98765 43210',
-};
+// ── Live data (loaded from API on init) ──────
+let STUDENT = { name: 'Loading...', initials: '..', rollNumber: '', department: '', semester: '', batch: '', cgpa: 0, email: '', phone: '' };
 
-const STATS = {
-  attendance: 84.2,
-  leavesUsed: 7,
-  leavesTotal: INSTITUTION.leavePolicy.maxLeavesPerSemester,
-  pendingLeaves: 2,
-  subjects: 6,
-};
+let STATS = { attendance: 0, leavesUsed: 0, leavesTotal: INSTITUTION.leavePolicy.maxLeavesPerSemester, pendingLeaves: 0, subjects: 0 };
 
-const ATTENDANCE = [
-  { subject: 'Data Structures',        code: 'CS301', present: 38, total: 45, percent: 84 },
-  { subject: 'Operating Systems',      code: 'CS302', present: 40, total: 45, percent: 89 },
-  { subject: 'Database Management',    code: 'CS303', present: 32, total: 45, percent: 71 },
-  { subject: 'Computer Networks',      code: 'CS304', present: 41, total: 45, percent: 91 },
-  { subject: 'Software Engineering',   code: 'CS305', present: 29, total: 45, percent: 64 },
-  { subject: 'Machine Learning',       code: 'CS306', present: 36, total: 45, percent: 80 },
-];
+let ATTENDANCE = [];
+let MARKS = [];
+let LEAVES = [];
+let NOTICES_DATA = [];
+let HOSTEL_LEAVES = [];
 
-const MARKS = [
-  { subject: 'Data Structures',       code: 'CS301', internal: 28, external: 71, total: 99,  max: 125, grade: 'A+' },
-  { subject: 'Operating Systems',     code: 'CS302', internal: 25, external: 68, total: 93,  max: 125, grade: 'A'  },
-  { subject: 'Database Management',   code: 'CS303', internal: 30, external: 74, total: 104, max: 125, grade: 'O'  },
-  { subject: 'Computer Networks',     code: 'CS304', internal: 22, external: 65, total: 87,  max: 125, grade: 'A'  },
-  { subject: 'Software Engineering',  code: 'CS305', internal: 18, external: 58, total: 76,  max: 125, grade: 'B+' },
-  { subject: 'Machine Learning',      code: 'CS306', internal: 26, external: 70, total: 96,  max: 125, grade: 'A+' },
-];
+// ── Load all data from API ───────────────────
+async function loadAllData() {
+  try {
+    const [profile, attData, marksData, leavesData, noticesData, hostelData] = await Promise.allSettled([
+      auth.me(),
+      attendance.getMine(),
+      marks.getMine(),
+      leaves.getMine(),
+      notices.getAll(),
+      hostelLeaves.getMine(),
+    ]);
 
-const LEAVES = [
-  { id: 'LV001', type: 'Medical Leave',   from: 'Dec 12, 2025', to: 'Dec 14, 2025', days: 3, reason: 'Fever and viral infection', status: 'approved', appliedOn: 'Dec 11, 2025', comment: 'Approved. Get well soon.' },
-  { id: 'LV002', type: 'Family Function', from: 'Jan 3, 2026',  to: 'Jan 4, 2026',  days: 2, reason: 'Sister\'s wedding ceremony', status: 'pending',  appliedOn: 'Dec 28, 2025', comment: '' },
-  { id: 'LV003', type: 'Personal',        from: 'Nov 28, 2025', to: 'Nov 28, 2025', days: 1, reason: 'Personal work at home',    status: 'rejected', appliedOn: 'Nov 27, 2025', comment: 'Insufficient reason provided.' },
-  { id: 'LV004', type: 'Medical Leave',   from: 'Oct 5, 2025',  to: 'Oct 6, 2025',  days: 2, reason: 'Dental surgery',           status: 'approved', appliedOn: 'Oct 4, 2025',  comment: 'Approved with medical certificate.' },
-];
+    if (profile.status === 'fulfilled' && profile.value) {
+      const p = profile.value;
+      STUDENT = {
+        name: p.name || 'Student',
+        initials: (p.name || 'S').split(' ').map(w => w[0]).join(''),
+        rollNumber: p.roll_number || '',
+        department: p.department || '',
+        semester: p.semester ? `${p.semester}th Semester` : '',
+        batch: p.batch || '',
+        cgpa: 0,
+        email: p.email || '',
+        phone: p.phone || '',
+      };
+    }
 
-const NOTICES = [
-  { title: 'End Semester Exam Schedule Released', date: 'Apr 20, 2026', tag: 'Exam' },
-  { title: 'Holiday on Apr 30 — Maharashtra Day', date: 'Apr 18, 2026', tag: 'Holiday' },
-  { title: 'Internal Assessment Marks Published',  date: 'Apr 15, 2026', tag: 'Marks' },
-];
+    if (attData.status === 'fulfilled' && Array.isArray(attData.value)) {
+      ATTENDANCE = attData.value.map(a => ({
+        subject: a.subject, code: a.code,
+        present: parseInt(a.present) || 0,
+        total: parseInt(a.total) || 0,
+        percent: parseFloat(a.percent) || 0,
+      }));
+      const totalPct = ATTENDANCE.reduce((s, a) => s + a.percent, 0);
+      STATS.attendance = ATTENDANCE.length ? Math.round(totalPct / ATTENDANCE.length * 10) / 10 : 0;
+      STATS.subjects = ATTENDANCE.length;
+    }
 
-const HOSTEL_LEAVES = [
-  {
-    id: 'HL001',
-    reason: 'Going home for Diwali',
-    from: 'Oct 30, 2025',
-    fromTime: '06:00 AM',
-    to: 'Nov 2, 2025',
-    toTime: '08:00 PM',
-    status: 'approved',
-    appliedOn: 'Oct 28, 2025',
-    warden: 'Mr. Ramesh Kumar',
-    comment: 'Approved. Report back on time.',
-  },
-  {
-    id: 'HL002',
-    reason: 'Medical checkup at home',
-    from: 'Dec 5, 2025',
-    fromTime: '09:00 AM',
-    to: 'Dec 5, 2025',
-    toTime: '07:00 PM',
-    status: 'approved',
-    appliedOn: 'Dec 4, 2025',
-    warden: 'Mr. Ramesh Kumar',
-    comment: '',
-  },
-  {
-    id: 'HL003',
-    reason: 'Family emergency',
-    from: 'Jan 10, 2026',
-    fromTime: '07:00 AM',
-    to: 'Jan 12, 2026',
-    toTime: '09:00 PM',
-    status: 'pending',
-    appliedOn: 'Jan 9, 2026',
-    warden: 'Mr. Ramesh Kumar',
-    comment: '',
-  },
-];
+    if (marksData.status === 'fulfilled' && Array.isArray(marksData.value)) {
+      MARKS = marksData.value.map(m => {
+        const total = (m.internal || 0) + (m.external || 0);
+        const max = 125;
+        const pct = Math.round((total / max) * 100);
+        let grade = 'F';
+        for (const g of INSTITUTION.gradingScale) {
+          if (pct >= g.minPercent) { grade = g.grade; break; }
+        }
+        return { subject: m.subject, code: m.code, internal: m.internal, external: m.external, total, max, grade };
+      });
+      if (MARKS.length) {
+        const avgPct = MARKS.reduce((s, m) => s + (m.total / m.max) * 10, 0) / MARKS.length;
+        STUDENT.cgpa = Math.round(avgPct * 10) / 10;
+      }
+    }
+
+    if (leavesData.status === 'fulfilled' && Array.isArray(leavesData.value)) {
+      LEAVES = leavesData.value.map(l => ({
+        id: 'LV' + String(l.id).padStart(3, '0'),
+        type: l.type,
+        from: new Date(l.from_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        to: new Date(l.to_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        days: l.days,
+        reason: l.reason,
+        status: l.status,
+        appliedOn: new Date(l.applied_on).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        comment: l.admin_comment || '',
+      }));
+      STATS.leavesUsed = LEAVES.length;
+      STATS.pendingLeaves = LEAVES.filter(l => l.status === 'pending').length;
+    }
+
+    if (noticesData.status === 'fulfilled' && Array.isArray(noticesData.value)) {
+      NOTICES_DATA = noticesData.value.map(n => ({
+        title: n.title,
+        date: new Date(n.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        tag: n.tag || 'General',
+      }));
+    }
+
+    if (hostelData.status === 'fulfilled' && Array.isArray(hostelData.value)) {
+      HOSTEL_LEAVES = hostelData.value.map(h => ({
+        id: 'HL' + String(h.id).padStart(3, '0'),
+        reason: h.reason,
+        from: new Date(h.from_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        fromTime: h.from_time ? h.from_time.slice(0,5) : '',
+        to: new Date(h.to_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        toTime: h.to_time ? h.to_time.slice(0,5) : '',
+        status: h.status,
+        appliedOn: new Date(h.applied_on).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }),
+        warden: 'Warden',
+        comment: h.warden_comment || '',
+      }));
+    }
+  } catch (err) {
+    console.error('Failed to load dashboard data:', err);
+  }
+}
 
 // ── Render ────────────────────────────────────
 
 export function renderStudentDashboard() {
+  if (!isLoggedIn()) {
+    window.location.href = '/src/pages/login.html';
+    return document.createElement('div');
+  }
+
   const wrapper = document.createElement('div');
   wrapper.className = 'sd-wrapper';
 
@@ -191,7 +216,14 @@ export function renderStudentDashboard() {
   injectDashboardStyles();
 
   // Init after DOM insertion
-  requestAnimationFrame(() => initDashboard(wrapper));
+  requestAnimationFrame(async () => {
+    // Basic loading state
+    const content = wrapper.querySelector('#sdContent');
+    if (content) content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-muted)">Loading dashboard...</div>';
+    
+    await loadAllData();
+    initDashboard(wrapper);
+  });
 
   return wrapper;
 }
@@ -296,7 +328,11 @@ function renderOverview() {
           <span class="sd-card-tag">This Semester</span>
         </div>
         <div class="att-summary-list">
-          ${ATTENDANCE.map(s => `
+          ${ATTENDANCE.length === 0 ? `
+            <div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">
+              No subjects enrolled for this semester.
+            </div>
+          ` : ATTENDANCE.map(s => `
             <div class="att-row">
               <div class="att-row-left">
                 <div class="att-subject">${s.subject}</div>
@@ -451,15 +487,21 @@ function renderMarks() {
           </tr>
         </thead>
         <tbody>
-          ${MARKS.map(m => {
+          ${MARKS.length === 0 ? `
+            <tr>
+              <td colspan="7" style="text-align:center;padding:40px;color:var(--text-muted)">
+                No marks have been recorded for this semester yet.
+              </td>
+            </tr>
+          ` : MARKS.map(m => {
             const pct = Math.round((m.total / m.max) * 100);
             return `
               <tr>
                 <td><strong>${m.subject}</strong></td>
                 <td class="td-muted">${m.code}</td>
-                <td>${m.internal}</td>
-                <td>${m.external}</td>
-                <td><strong>${m.total}</strong></td>
+                <td>${m.internal || 0}</td>
+                <td>${m.external || 0}</td>
+                <td><strong>${m.total || 0}</strong></td>
                 <td>
                   <div class="td-bar-wrap">
                     <div class="td-bar-fill" style="width:${pct}%;background:var(--gold)"></div>
@@ -1023,12 +1065,35 @@ function initHostelForm(container) {
     hostelBtnTxt.style.opacity = '0';
     hostelSpinner.style.display = 'block';
 
-    await new Promise(r => setTimeout(r, 1400));
+    // Call real API
+    try {
+      await hostelLeaves.apply({
+        reason: container.querySelector('#hostelReason').value,
+        fromDate: fromDate.value,
+        fromTime: fromTime.value,
+        toDate: toDate.value,
+        toTime: toTime.value
+      });
 
-    // Show success
-    form.querySelectorAll('.form-group, .hostel-datetime-row, .hostel-section-label, .apply-days-preview, .apply-form-footer, .hostel-info-bar')
-      .forEach(el => el.style.display = 'none');
-    hostelSuccess.style.display = 'block';
+      // Show success
+      form.querySelectorAll('.form-group, .hostel-datetime-row, .hostel-section-label, .apply-days-preview, .apply-form-footer, .hostel-info-bar')
+        .forEach(el => el.style.display = 'none');
+      hostelSuccess.style.display = 'block';
+
+      // Reload data in background
+      loadAllData();
+    } catch (err) {
+      hostelBtn.disabled = false;
+      hostelBtnTxt.style.opacity = '1';
+      hostelSpinner.style.display = 'none';
+      
+      const hostelError = container.querySelector('#hostelError');
+      const hostelErrorText = container.querySelector('#hostelErrorText');
+      if (hostelError && hostelErrorText) {
+        hostelErrorText.textContent = err.message || 'Failed to submit hostel leave';
+        hostelError.style.display = 'flex';
+      }
+    }
   });
 }
 
@@ -1036,11 +1101,8 @@ function initHostelForm(container) {
 
 function renderNotices() {
   const el = document.createElement('div');
-  const all = [
-    ...NOTICES,
-    { title: 'Project Submission Deadline — May 10', date: 'Apr 12, 2026', tag: 'Academic' },
-    { title: 'Sports Day — Apr 28, Registration Open',  date: 'Apr 10, 2026', tag: 'Event' },
-    { title: 'Library Timings Extended till 9 PM', date: 'Apr 8, 2026', tag: 'Info' },
+  const all = NOTICES_DATA.length > 0 ? NOTICES_DATA : [
+    { title: 'No notices yet', date: '', tag: 'Info' },
   ];
   const tagColors = { Exam:'#DBEAFE:#1E40AF', Holiday:'#D1FAE5:#065F46', Marks:'#FEF3C7:#92400E', Academic:'#EDE9FE:#5B21B6', Event:'#FCE7F3:#9D174D', Info:'#F0F9FF:#0369A1' };
 
@@ -1242,14 +1304,32 @@ function initApplyForm(container) {
     applyBtnTxt.style.opacity = '0';
     applySpinner.style.display = 'block';
 
-    await new Promise(r => setTimeout(r, 1400));
+    // Call real API
+    try {
+      await leaves.apply({
+        type: container.querySelector('#leaveType').value,
+        reason: container.querySelector('#leaveReason').value,
+        fromDate: container.querySelector('#fromDate').value,
+        toDate: container.querySelector('#toDate').value
+      });
 
-    applyBtn.style.display    = 'none';
-    applySpinner.style.display= 'none';
-    form.querySelectorAll('.form-group').forEach(g => g.style.display = 'none');
-    form.querySelector('.apply-date-row')?.style && (form.querySelector('.apply-date-row').style.display = 'none');
-    form.querySelector('.apply-form-footer').style.display = 'none';
-    applySuccess.style.display = 'block';
+      applyBtn.style.display    = 'none';
+      applySpinner.style.display= 'none';
+      form.querySelectorAll('.form-group').forEach(g => g.style.display = 'none');
+      form.querySelector('.apply-date-row')?.style && (form.querySelector('.apply-date-row').style.display = 'none');
+      form.querySelector('.apply-form-footer').style.display = 'none';
+      applySuccess.style.display = 'block';
+
+      // Reload data in background
+      loadAllData();
+    } catch (err) {
+      applyBtn.disabled = false;
+      applyBtnTxt.style.opacity = '1';
+      applySpinner.style.display = 'none';
+      
+      applyError.style.display = 'flex';
+      applyError.querySelector('span') && (applyError.querySelector('span').textContent = err.message || 'Failed to submit application');
+    }
   });
 }
 

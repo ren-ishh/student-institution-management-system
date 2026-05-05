@@ -4,6 +4,7 @@
 // ============================================
 
 import INSTITUTION from '../../config/institution.js';
+import { auth, saveToken, saveUser } from '../api.js';
 
 export function renderLogin() {
   const page = document.createElement('div');
@@ -272,7 +273,7 @@ function initLoginLogic(page) {
       // Update placeholder and label per role
       const placeholders = {
         student: { label: 'Roll Number', ph: 'e.g. CS2023001' },
-        admin:   { label: 'Admin ID',    ph: 'e.g. ADM001' },
+        admin:   { label: 'Admin Email', ph: 'e.g. priya.mehta@greenfield.edu.in' },
         faculty: { label: 'Faculty ID',  ph: 'e.g. FAC042' },
       };
       rollLabel.textContent = placeholders[currentRole].label;
@@ -335,24 +336,23 @@ function initLoginLogic(page) {
     // Show loading
     setLoading(true);
 
-    // Simulate auth (replace with real API call later)
-    await fakeAuth(id, pwd, currentRole)
-      .then(() => {
-        loginBtnText.textContent = 'Redirecting...';
-        // Route to correct dashboard
-        const routes = {
-          student: '/src/pages/student-dashboard.html',
-          admin:   '/src/pages/admin-dashboard.html',
-          faculty: '/src/pages/faculty-dashboard.html',
-        };
-        setTimeout(() => {
-          window.location.href = routes[currentRole];
-        }, 600);
-      })
-      .catch((err) => {
-        setLoading(false);
-        showBannerError(err.message);
-      });
+    try {
+      const data = await auth.login(id, pwd, currentRole);
+      saveToken(data.token);
+      saveUser(data.user);
+      loginBtnText.textContent = 'Redirecting...';
+      const routes = {
+        student: '/src/pages/student-dashboard.html',
+        admin:   '/src/pages/admin-dashboard.html',
+        faculty: '/src/pages/faculty-dashboard.html',
+      };
+      setTimeout(() => {
+        window.location.href = routes[data.user.role];
+      }, 600);
+    } catch (err) {
+      setLoading(false);
+      showBannerError(err.message || 'Incorrect ID or password. Please try again.');
+    }
   });
 
   // Helpers
@@ -385,25 +385,7 @@ function initLoginLogic(page) {
   }
 }
 
-// Simulated auth — replace with real fetch() later
-function fakeAuth(id, password, role) {
-  return new Promise((resolve, reject) => {
-    setTimeout(() => {
-      // Demo credentials
-      const valid = {
-        student: { id: 'CS2023001', password: '1234' },
-        admin:   { id: 'ADM001',    password: 'admin' },
-        faculty: { id: 'FAC042',    password: 'faculty' },
-      };
-      const cred = valid[role];
-      if (id === cred.id && password === cred.password) {
-        resolve();
-      } else {
-        reject(new Error('Incorrect ID or password. Please try again.'));
-      }
-    }, 1200);
-  });
-}
+// Auth is now handled by the real API via api.js
 
 // ── Styles ────────────────────────────────────
 
